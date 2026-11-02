@@ -2,11 +2,12 @@ import type * as HermesSdk from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { WritableAtom } from 'nanostores'
-import { useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { CANONICAL_GROUP_LOCALES } from './canonical-group-locales'
-import { $canonicalGroupBindings } from './canonical-group-registry'
+import { $canonicalGroupBindings, CanonicalGroupList } from './canonical-group-registry'
+import type { CanonicalRoom } from './canonical-groups'
 import { CreateGroupChatDialog } from './create-dialog'
 import { $botMeta } from './data'
 import { $groupChats, $groupChatWorkspace, updateGroupChat } from './group-chat'
@@ -179,6 +180,63 @@ function pendingCreation() {
 
   return { serverRooms, finish: () => finish() }
 }
+
+function CreatingGroupDialog() {
+  const [open, setOpen] = useState(true)
+
+  return <CreateGroupChatDialog onClose={() => setOpen(false)} open={open} roster={roster} />
+}
+
+it.each(['dialog', 'upgrade'] as const)('refreshes the mounted sidebar after the %s creation acknowledgement (#147808)', async path => {
+  const rooms: CanonicalRoom[] = []
+  let acknowledge!: () => void
+  request.mockImplementation(async (_route, method, params) => {
+    if (method === 'groups.capabilities') {return { driver: true, persistent_process: true }}
+
+    if (method === 'groups.list') {return { rooms: [...rooms], next_offset: null }}
+
+    if (method === 'groups.create') {
+      const room = { room_id: params.room_id, name: params.name, members: params.members }
+      rooms.push(room)
+
+      return new Promise(resolve => { acknowledge = () => resolve({ room }) })
+    }
+
+    if (method === 'groups.state') {return { room: rooms[0], driver_status: {} }}
+
+    if (method === 'groups.log') {return { events: [] }}
+
+    throw new Error(`Unexpected RPC: ${method}`)
+  })
+  const sidebar = render(<CanonicalGroupList onOpen={vi.fn()} />)
+  await waitFor(() => expect(request.mock.calls.filter(call => call[1] === 'groups.list')).toHaveLength(1))
+  await act(async () => {})
+
+  if (path === 'dialog') {
+    render(<CreatingGroupDialog />)
+    await waitFor(() => expect(screen.getAllByRole('checkbox')).toHaveLength(2))
+
+    for (const checkbox of screen.getAllByRole('checkbox')) {fireEvent.click(checkbox)}
+    const submit = screen.getByRole('button', { name: 'Create Group (2)' })
+    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(submit)
+  } else {
+    render(<GroupChatWorkspace group="Created gateway room" members={roster} />)
+    const start = screen.getByRole('button', { name: 'Start gateway group' })
+    await waitFor(() => expect((start as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(start)
+  }
+
+  await waitFor(() => expect(rooms).toHaveLength(1))
+  expect(sidebar.container.textContent).not.toContain(rooms[0].name)
+  const readsBeforeAck = request.mock.calls.filter(call => call[1] === 'groups.list').length
+  await act(async () => { acknowledge() })
+  await screen.findByRole('button', { name: rooms[0].name })
+  await act(async () => {})
+  // Exactly one refresh; discovery must not start a refresh/registration loop.
+  expect(request.mock.calls.filter(call => call[1] === 'groups.list')).toHaveLength(readsBeforeAck + 1)
+  expect(request.mock.calls.filter(call => call[1] === 'groups.create')).toHaveLength(1)
+})
 
 it.each(refused)('classifies %j as unavailable on both surfaces: no legacy renderer, no legacy creation', async value => {
   answer(value)

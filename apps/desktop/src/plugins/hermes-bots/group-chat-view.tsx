@@ -48,6 +48,7 @@ import {
   canonicalGroupBindingFor,
   canonicalGroupKeyRoute,
   publishCanonicalGroup,
+  refreshCanonicalGroupList,
   registerCanonicalGroup,
   resolveCanonicalGroup
 } from './canonical-group-registry'
@@ -691,7 +692,11 @@ function GroupExecutionGate(props: GroupChatWorkspaceProps) {
       setBusy(true)
       void createCanonicalGroup(route, props.group, props.members)
         .then(({ room }) => {
-          if (sourceCurrent()) {openGroupChat(registerCanonicalGroup(route, room), 'key')}
+          if (sourceCurrent()) {
+            const key = registerCanonicalGroup(route, room)
+            refreshCanonicalGroupList()
+            openGroupChat(key, 'key')
+          }
         })
         .catch(e => { if (sourceCurrent()) {setError(String(e))} }).finally(() => setBusy(false))
     }}>Start gateway group</Button>

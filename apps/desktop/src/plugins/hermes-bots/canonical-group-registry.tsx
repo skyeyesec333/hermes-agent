@@ -18,6 +18,13 @@ export function forgetCanonicalGroup({ connectionId, profile, roomId }: Canonica
   $canonicalGroupListRevision.set($canonicalGroupListRevision.get() + 1)
 }
 
+/** #147808: re-read the sidebar list after a room is minted locally (create dialog,
+ *  legacy-room upgrade). Registration alone must not bump the revision: list discovery
+ *  registers every listed room, so bumping there would reload forever. */
+export function refreshCanonicalGroupList(): void {
+  $canonicalGroupListRevision.set($canonicalGroupListRevision.get() + 1)
+}
+
 export function registerCanonicalGroup(route: CanonicalGroupRoute, room: CanonicalRoom): string {
   const key = `canonical:${encodeURIComponent(route.connectionId)}:${encodeURIComponent(route.profile)}:${room.room_id}`
   $canonicalGroupBindings.set({ ...$canonicalGroupBindings.get(), [key]: { ...route, roomId: room.room_id, roomName: room.name } })
